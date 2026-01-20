@@ -1,169 +1,209 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>数字转猫娘拼图 & 文本混淆</title>
-    <link rel="stylesheet" href="static/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数字转猫娘 ^•ﻌ•^ฅ</title>
     <style>
-        /* 额外补充一些混淆功能的样式，保持风格统一 */
-        .obfuscate-section {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 2px dashed #eee;
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 100%; max-width: 600px; text-align: center; }
+        h1 { margin-bottom: 20px; color: #333; font-size: 24px; }
+        .input-group { margin-bottom: 20px; display: flex; gap: 10px; justify-content: center; }
+        input[type="text"] { padding: 10px; font-size: 16px; border: 2px solid #ddd; border-radius: 6px; outline: none; flex: 1; }
+        select { padding: 10px; font-size: 16px; border: 2px solid #ddd; border-radius: 6px; width: 100px; }
+        button { background: #4a90e2; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #357abd; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        
+        /* 预览区域样式 */
+        #preview-area { 
+            margin-top: 20px; 
+            min-height: 150px; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center; 
+            align-items: center; 
+            border: 2px dashed #ddd; 
+            border-radius: 8px; 
+            padding: 20px; 
+            background: #fafafa; 
         }
-        .status-msg {
-            font-size: 14px;
-            margin-top: 10px;
-            color: #4CAF50;
-            display: none;
+        
+        img.result { 
+            max-width: 100%; 
+            height: auto; 
+            image-rendering: pixelated; 
+            border-radius: 4px; 
+            border: 1px solid #eee; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
-        #image-preview-container {
-            display: none;
-        }
+        
+        .status { margin-top: 15px; color: #666; font-size: 14px; line-height: 1.6; }
+        .hint { color: #2196F3; font-weight: bold; margin-top: 10px; display: none; }
+        
+        .obfuscate-box { margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; width: 100%; }
+        #hidden-work-area { position: absolute; top: -9999px; visibility: hidden; }
     </style>
 </head>
 <body>
+
 <div class="container">
-    <h1>数字转猫娘拼图 ^•ﻌ•^ฅ</h1>
+    <h1>Pixel 拼图生成器 ^•ﻌ•^ฅ</h1>
     
-    <div class="section">
-        <input type="text" id="numInput" placeholder="请输入数字 (1-30位)" maxlength="30">
+    <div class="input-group">
+        <input type="text" id="numberInput" placeholder="输入数字 (例如: 1024)" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
         <select id="formatSelect">
             <option value="png">PNG</option>
             <option value="gif">GIF</option>
         </select>
-        <button type="button" onclick="handleGenerate()">生成拼图</button>
+        <button onclick="startGenerate()" id="genBtn">生成拼图</button>
     </div>
 
-    <div id="image-preview-container" class="result">
-        <h2>生成结果</h2>
-        <div id="canvas-wrapper"></div>
-        <br>
-        <a id="download-link" href="#" download class="download-btn">下载图片</a>
+    <div id="preview-area">
+        <div id="imageWrapper">
+            <span style="color:#ccc">等待生成...</span>
+        </div>
+        <div id="saveHint" class="hint">因安全策略无法直接下载, 请拖动或右键图片“另存为”</div>
     </div>
+    
+    <div class="status" id="statusText">准备就绪</div>
 
-    <div class="obfuscate-section">
-        <h3>文本隐形混淆器</h3>
-        <input type="text" id="textInput" style="width: 80%;" placeholder="输入链接或文本进行暴力混淆...">
-        <button type="button" style="background: #2196F3;" onclick="handleObfuscate()">混淆并复制</button>
-        <div id="obfuscateStatus" class="status-msg">✨ 已混淆并复制到剪贴板</div>
+    <div class="obfuscate-box">
+        <h3 style="font-size: 16px; color: #555;">文本/URL 零宽混淆</h3>
+        <div class="input-group">
+            <input type="text" id="textInput" placeholder="输入内容...">
+            <button style="background: #4CAF50;" onclick="obfuscateText()">混淆并复制</button>
+        </div>
+        <div id="obfStatus" class="status" style="color: #4CAF50;"></div>
     </div>
 </div>
 
+<div id="hidden-work-area"></div>
+
+<script src="lib/libgif.js"></script>
 <script src="lib/gif.js"></script>
 
 <script>
-    const BOM = '\ufeff'; // 零宽不换行空格
+    const ASSETS_PNG = 'assets/danbooru/';
+    const ASSETS_GIF = 'assets/gelbooru/';
+    const BOM = '\ufeff'; 
 
-    // === 逻辑 1: 文本暴力混淆 ===
-    function handleObfuscate() {
+    // === 文本混淆 ===
+    function obfuscateText() {
         const input = document.getElementById('textInput').value;
         if (!input) return;
-        
-        // 每个字符间插入零宽字符
-        const obfuscated = input.split('').join(BOM);
-        
-        // 复制到剪贴板
-        navigator.clipboard.writeText(obfuscated).then(() => {
-            const status = document.getElementById('obfuscateStatus');
-            status.style.display = 'block';
-            setTimeout(() => { status.style.display = 'none'; }, 2000);
+        const result = input.split('').join(BOM);
+        navigator.clipboard.writeText(result).then(() => {
+            const status = document.getElementById('obfStatus');
+            status.innerText = "✅ 已复制到剪贴板";
+            setTimeout(() => status.innerText = "", 2000);
         });
     }
 
-    // === 逻辑 2: 图片拼图生成 ===
-    async function handleGenerate() {
-        const numStr = document.getElementById('numInput').value.trim();
+    // === 图片生成逻辑 ===
+    async function startGenerate() {
+        const text = document.getElementById('numberInput').value;
         const format = document.getElementById('formatSelect').value;
-        const container = document.getElementById('image-preview-container');
-        const wrapper = document.getElementById('canvas-wrapper');
+        const btn = document.getElementById('genBtn');
+        const status = document.getElementById('statusText');
+        const saveHint = document.getElementById('saveHint');
+        const wrapper = document.getElementById('imageWrapper');
 
-        if (!/^\d+$/.test(numStr)) {
-            alert("请输入纯数字");
-            return;
-        }
+        if (!text) return alert("请输入数字！");
 
-        wrapper.innerHTML = "正在处理...";
-        container.style.display = 'block';
+        btn.disabled = true;
+        saveHint.style.display = 'none';
+        status.innerText = "⏳ 正在合成中，请稍候...";
+        wrapper.innerHTML = '<span style="color:#ccc">正在处理...</span>';
 
         try {
+            let blobUrl;
             if (format === 'png') {
-                const dataUrl = await createPngCollage(numStr);
-                displayResult(dataUrl, `collage_${numStr}.png`);
+                blobUrl = await generatePNG(text);
             } else {
-                // GIF 逻辑
-                wrapper.innerHTML = "GIF 生成中 (请稍候)...";
-                const dataUrl = await createGifCollage(numStr);
-                displayResult(dataUrl, `collage_${numStr}.gif`);
+                blobUrl = await generateGIF(text, status);
             }
+            
+            // 创建图片对象并显示
+            const img = new Image();
+            img.src = blobUrl;
+            img.className = 'result';
+            
+            // 重要：为了让右键保存时默认文件名正确，虽然在内存中受限，但我们尝试设置 alt
+            img.alt = `${text}.${format}`;
+            img.title = `${text}.${format}`;
+
+            wrapper.innerHTML = '';
+            wrapper.appendChild(img);
+
+            saveHint.style.display = 'block';
+            status.innerText = "✨ 合成完毕";
+
         } catch (e) {
-            wrapper.innerHTML = "生成失败，请确保 assets 目录下有对应的图片资源";
             console.error(e);
+            status.innerText = "❌ 错误: " + e.message;
+            wrapper.innerHTML = '<span style="color:#ff4757">合成失败</span>';
+        } finally {
+            btn.disabled = false;
         }
     }
 
-    function displayResult(url, filename) {
-        const wrapper = document.getElementById('canvas-wrapper');
-        const dlLink = document.getElementById('download-link');
-        
-        wrapper.innerHTML = `<img src="${url}" class="preview">`;
-        dlLink.href = url;
-        dlLink.download = filename;
-    }
-
-    // PNG 拼接
-    async function createPngCollage(numStr) {
-        const images = await Promise.all(numStr.split('').map(n => loadImage(`assets/danbooru/${n}.png`)));
+    async function generatePNG(text) {
+        const images = await Promise.all(text.split('').map(char => loadImage(`${ASSETS_PNG}${char}.png`)));
         const canvas = document.createElement('canvas');
+        canvas.width = images.reduce((sum, img) => sum + img.width, 0);
+        canvas.height = images[0].height;
         const ctx = canvas.getContext('2d');
         
-        const totalWidth = images.reduce((sum, img) => sum + img.width, 0);
-        const height = images[0].height;
-        
-        canvas.width = totalWidth;
-        canvas.height = height;
-        
-        let xOffset = 0;
+        let x = 0;
         images.forEach(img => {
-            ctx.drawImage(img, xOffset, 0);
-            xOffset += img.width;
+            ctx.drawImage(img, x, 0);
+            x += img.width;
         });
         
-        return canvas.toDataURL('image/png');
+        return new Promise(resolve => canvas.toBlob(blob => resolve(URL.createObjectURL(blob)), 'image/png'));
     }
 
-    // GIF 拼接 (基于 gif.js)
-    async function createGifCollage(numStr) {
-        return new Promise(async (resolve, reject) => {
-            const gif = new GIF({
-                workers: 2,
-                quality: 10,
-                workerScript: 'lib/gif.worker.js'
-            });
+    async function generateGIF(text, statusLabel) {
+        statusLabel.innerText = "🎞️ 解析 GIF 序列...";
+        const parsedGifs = [];
+        for (let char of text) {
+            const frames = await parseGifFrames(`${ASSETS_GIF}${char}.gif`);
+            parsedGifs.push(frames);
+        }
 
-            const imgs = await Promise.all(numStr.split('').map(n => loadImage(`assets/gelbooru/${n}.gif`)));
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const totalWidth = imgs.reduce((sum, img) => sum + img.width, 0);
-            const height = imgs[0].height;
+        const totalWidth = Math.floor(parsedGifs.reduce((a, b) => a + b[0].dims.width, 0));
+        const height = Math.floor(parsedGifs[0][0].dims.height);
 
-            canvas.width = totalWidth;
-            canvas.height = height;
+        const gif = new GIF({
+            workers: 2,
+            quality: 10,
+            workerScript: 'lib/gif.worker.js',
+            width: totalWidth,
+            height: height
+        });
 
-            // 简单拼接逻辑：对于 GIF 暂时生成静态组合（前端完全解析 GIF 每一帧较为复杂）
-            // 如果需要动态拼接，建议在 PakePlus 中配套引入 libgif.js 解析帧
-            ctx.fillStyle = "white";
-            ctx.fillRect(0,0, canvas.width, canvas.height);
+        const canvas = document.createElement('canvas');
+        canvas.width = totalWidth;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+
+        const maxFrames = Math.max(...parsedGifs.map(g => g.length));
+        for (let i = 0; i < maxFrames; i++) {
+            ctx.clearRect(0, 0, totalWidth, height);
             let xOffset = 0;
-            imgs.forEach(img => {
-                ctx.drawImage(img, xOffset, 0);
-                xOffset += img.width;
+            parsedGifs.forEach(frames => {
+                const frameData = frames[i % frames.length];
+                if(frameData.patch) {
+                     ctx.putImageData(frameData.patch, xOffset, 0);
+                }
+                xOffset += frameData.dims.width;
             });
-
             gif.addFrame(ctx, {copy: true, delay: 200});
-            gif.on('finished', function(blob) {
-                resolve(URL.createObjectURL(blob));
-            });
+        }
+
+        return new Promise((resolve) => {
+            gif.on('finished', blob => resolve(URL.createObjectURL(blob)));
             gif.render();
         });
     }
@@ -172,8 +212,32 @@
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.onload = () => resolve(img);
-            img.onerror = reject;
+            img.onerror = () => reject(new Error("素材丢失: " + src));
             img.src = src;
+        });
+    }
+
+    function parseGifFrames(src) {
+        return new Promise((resolve) => {
+            const img = document.createElement('img');
+            img.src = src;
+            const div = document.createElement('div');
+            div.appendChild(img);
+            document.getElementById('hidden-work-area').appendChild(div);
+            const superGif = new SuperGif({ gif: img });
+            superGif.load(() => {
+                const frames = [];
+                for (let i = 0; i < superGif.get_length(); i++) {
+                    superGif.move_to(i);
+                    const canvas = superGif.get_canvas();
+                    frames.push({
+                        patch: canvas.getContext('2d').getImageData(0,0, canvas.width, canvas.height),
+                        dims: { width: Math.floor(canvas.width), height: Math.floor(canvas.height) }
+                    });
+                }
+                div.remove();
+                resolve(frames);
+            });
         });
     }
 </script>
